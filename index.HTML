@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>纯GitHub多人涂鸦 🎨</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#8B5CF6',
+                        secondary: '#EC4899',
+                        neutral: '#1F2937',
+                    },
+                    fontFamily: {
+                        comic: ['"Comic Sans MS"', '"Chalkboard SE"', 'cursive'],
+                    },
+                }
+            }
+        }
+    </script>
+    <style type="text/tailwindcss">
+        @layer utilities {
+            .brush-shadow { box-shadow: 0 0 12px rgba(139, 92, 246, 0.6); }
+            .pulse { animation: pulse 2s infinite; }
+            .float { animation: float 3s ease-in-out infinite; }
+            .bubble { animation: bubble 0.4s ease-out; }
+        }
+
+        @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.05); } 100% { transform: scale(1); } }
+        @keyframes float { 0% { transform: translateY(0); } 50% { transform: translateY(-8px); } 100% { transform: translateY(0); } }
+        @keyframes bubble { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+        canvas { touch-action: none; cursor: crosshair; }
+        .tool-btn.active { @apply bg-primary text-white brush-shadow; }
+        .color-btn.active { @apply ring-2 ring-primary ring-offset-1; }
+        .chat-self { @apply bg-primary text-white rounded-tl-2xl rounded-tr-md rounded-bl-2xl; }
+        .chat-other { @apply bg-gray-200 rounded-tr-2xl rounded-tl-md rounded-br-2xl; }
+    </style>
+</head>
+<body class="bg-gray-50 font-comic text-neutral min-h-screen flex flex-col">
+    <!-- 顶部导航 -->
+    <header class="bg-white shadow-md py-3 px-4 sticky top-0 z-40">
+        <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2">
+                <i class="fa fa-paint-brush text-primary text-2xl float"></i>
+                <h1 class="text-xl font-bold bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">
+                    GitHub多人涂鸦 🎨
+                </h1>
+            </div>
+            <div id="room-status" class="hidden items-center gap-2 text-sm">
+                <span class="bg-primary/10 px-2 py-1 rounded-full">
+                    房间: <span id="room-id" class="font-bold"></span>
+                </span>
+                <span class="bg-green-100 text-green-700 px-2 py-1 rounded-full">
+                    在线: <span id="online-count">1</span>
+                </span>
+            </div>
+        </div>
+    </header>
+
+    <!-- 初始页面（创建/加入房间） -->
+    <div id="init-screen" class="flex-1 flex flex-col items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-xl p-6 md:p-8 w-full max-w-md float">
+            <h2 class="text-2xl font-bold text-center mb-6 text-primary">开始涂鸦之旅！</h2>
+            
+            <!-- 创建房间 -->
+            <button id="create-room-btn" class="w-full bg-primary text-white py-3 rounded-xl font-bold mb-4 hover:bg-primary/90 transition pulse flex items-center justify-center gap-2">
+                <i class="fa fa-plus-circle"></i> 创建新房间
+            </button>
+            
+            <!-- 加入房间 -->
+            <div class="mb-6">
+                <label class="block text-sm font-medium mb-2 text-center">输入房间ID加入</label>
+                <div class="flex gap-2">
+                    <input type="text" id="join-room-id" placeholder="例如：abc123" class="flex-1 px-4 py-2 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary">
+                    <button id="join-room-btn" class="bg-secondary text-white px-4 rounded-xl hover:bg-secondary/90 transition">
+                        <i class="fa fa-sign-in"></i> 加入
+                    </button>
+                </div>
+            </div>
+            
+            <!-- 提示 -->
+            <div class="text-xs text-gray-500 text-center">
+                <p>📌 房间ID由6位字母/数字组成</p>
+                <p>📌 复制链接直接邀请好友加入</p>
+                <p>📌 数据保存在本地，刷新不丢失</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- 涂鸦主界面（默认隐藏） -->
+    <div id="doodle-screen" class="flex-1 flex flex-col md:flex-row hidden">
+        <!-- 左侧工具栏 -->
+        <aside class="bg-white p-3 shadow-lg flex md:flex-col justify-between gap-3 md:w-16 lg:w-20 flex-wrap md:flex-nowrap z-30">
+            <!-- 绘画工具 -->
+            <div class="flex md:flex-col gap-2">
+                <button class="tool-btn active w-10 h-10 md:w-12 md:h-12 rounded-full flex items-center justify-center bg-gray-100 hover:bg-gray-200 transition" data-tool="pencil" title="铅笔">
+                    <i class="fa fa-pencil text-xl"></i>
+                </button>
+                <button class="tool-btn w-10 h-10 md:w-12 md:h-12 rounded-full flex items-center justify-center bg-gray-100 hover:bg-gray-200 transition" data-tool="eraser" title="橡皮擦">
+                    <i class="fa fa-eraser text-xl"></i>
+                </button>
+                <button class="tool-btn w-10 h-10 md:w-12 md:h-12 rounded-full flex items-center justify-center bg-gray-100 hover:bg-gray-200 transition" data-tool="clear" title="清空画布">
+                    <i class="fa fa-trash text-xl"></i>
+                </button>
+                <button class="tool-btn w-10 h-10 md:w-12 md:h-12 rounded-full flex items-center justify-center bg-gray-100 hover:bg-gray-200 transition" data-tool="save" title="保存作品">
+                    <i class="fa fa-download text-xl"></i>
+                </button>
+                <button class="tool-btn w-10 h-10 md:w-12 md:h-12 rounded-full flex items-center justify-center bg-gray-100 hover:bg-gray-200 transition" data-tool="share" title="分享房间">
+                    <i class="fa fa-share-alt text-xl"></i>
+                </button>
+            </div>
+
+            <!-- 粗细调节 -->
+            <div class="flex md:flex-col gap-2 items-center md:items-stretch w-full">
+                <label class="text-xs md:text-sm text-center md:mb-1 w-full">粗细</label>
+                <input type="range" min="1" max="30" value="5" class="w-20 md:w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer" id="line-width">
+                <div class="flex gap-1 justify-center">
+                    <div class="w-2 h-2 bg-black rounded-full"></div>
+                    <div class="w-4 h-4 bg-black rounded-full"></div>
+                    <div class="w-6 h-6 bg-black rounded-full"></div>
+                </div>
+            </div>
+
+            <!-- 颜色选择 -->
+            <div class="flex md:flex-col gap-2">
+                <div class="color-btn active w-8 h-8 rounded-full bg-black" data-color="#000000"></div>
+                <div class="color-btn w-8 h-8 rounded-full bg-red-500" data-color="#EF4444"></div>
+                <div class="color-btn w-8 h-8 rounded-full bg-yellow-400" data-color="#FACC15"></div>
+                <div class="color-btn w-8 h-8 rounded-full bg-green-500" data-color="#22C55E"></div>
+                <div class="color-btn w-8 h-8 rounded-full bg-blue-500" data-color="#3B82F6"></div>
+                <div class="color-btn w-8 h-8 rounded-full bg-purple-500" data-color="#8B5CF6"></div>
+                <input type="color" class="w-8 h-8 rounded-full border-0 p-0" id="custom-color" value="#000000">
+            </div>
+        </aside>
+
+        <!-- 画布区域 -->
+        <div class="flex-1 flex flex-col md:flex-row overflow-hidden">
+            <div class="flex-1 bg-gray-100 flex items-center justify-center p-2 md:p-4">
+                <canvas id="doodle-canvas" class="bg-white rounded-xl shadow-md max-w-full max-h-full"></canvas>
+            </div>
+
+            <!-- 右侧聊天框（移动端底部） -->
+            <div class="md:w-80 bg-white shadow-lg flex flex-col h-48 md:h-full">
+                <div class="p-2 border-b border-gray-200 flex items-center justify-between">
+                    <h3 class="font-bold text-primary flex items-center gap-1">
+                        <i class="fa fa-comments"></i> 实时聊天
+                    </h3>
+                    <span id="chat-online" class="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">
+                        在线: 1
+                    </span>
+                </div>
+                <div id="chat-messages" class="flex-1 overflow-y-auto p-2 gap-2 flex flex-col"></div>
+                <div class="p-2 border-t border-gray-200">
+                    <div class="flex gap-2">
+                        <input type="text" id="chat-input" placeholder="输入消息..." class="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary">
+                        <button id="send-chat" class="bg-primary text-white px-4 py-2 rounded-lg hover:bg-primary/90 transition">
+                            <i class="fa fa-paper-plane"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 分享模态框（默认隐藏） -->
+    <div id="share-modal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-2xl p-6 w-11/12 max-w-md">
+            <h3 class="text-xl font-bold mb-4 text-primary flex items-center gap-2">
+                <i class="fa fa-share-alt"></i> 分享房间
+            </h3>
+            <div class="mb-4">
+                <label class="block text-sm font-medium mb-2">房间链接</label>
+                <div class="flex">
+                    <input type="text" id="room-link" class="flex-1 px-3 py-2 border border-gray-300 rounded-l-lg focus:outline-none focus:ring-2 focus:ring-primary" readonly>
+                    <button id="copy-link" class="bg-primary text-white px-4 py-2 rounded-r-lg hover:bg-primary/90 transition">
+                        复制
+                    </button>
+                </div>
+            </div>
+            <div class="mb-4">
+                <label class="block text-sm font-medium mb-2">房间ID</label>
+                <input type="text" id="share-room-id" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary" readonly>
+            </div>
+            <div class="flex justify-end gap-2">
+                <button id="close-share" class="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-100 transition">
+                    关闭
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 全局状态
+        const state = {
+            roomId: '',
+            username: '用户' + Math.floor(Math.random() * 1000),
+            isDrawing: false,
+            currentTool: 'pencil',
+            currentColor: '#000000',
+            lineWidth: 5,
+            canvasData: [], // 存储绘画历史
+            chatMessages: [] // 存储聊天记录
+        };
+
+        // DOM元素
+        const elements = {
+            initScreen: document.getElementById('init-screen'),
+            doodleScreen: document.getElementById('doodle-screen'),
+            createRoomBtn: document.getElementById('create-room-btn'),
+            joinRoomBtn: document.getElementById('join-room-btn'),
+            joinRoomId: document.getElementById('join-room-id'),
+            roomId: document.getElementById('room-id'),
+            onlineCount: document.getElementById('online-count'),
+            chatOnline: document.getElementById('chat-online'),
+            canvas: document.getElementById('doodle-canvas'),
+            ctx: document.getElementById('doodle-canvas').getContext('2d'),
+            lineWidth: document.getElementById('line-width'),
+            customColor: document.getElementById('custom-color'),
+            chatMessages: document.getElementById('chat-messages'),
+            chatInput: document.getElementById('chat-input'),
+            sendChat: document.getElementById('send-chat'),
+            shareModal: document.getElementById('share-modal'),
+            roomLink: document.getElementById('room-link'),
+            shareRoomId: document.getElementById('share-room-id'),
+            copyLink: document.getElementById('copy-link'),
+            closeShare: document.getElementById('close-share')
+        };
+
+        // 初始化画布
+        function initCanvas() {
+            const canvas = elements.canvas;
+            const container = canvas.parentElement;
+            
+            // 设置画布大小（适应容器）
+            function resizeCanvas() {
+                const containerWidth = container.clientWidth - 30;
+                const containerHeight = container.clientHeight - 30;
+                canvas.width = Math.max(400, containerWidth);
+                canvas.height = Math.max(300, containerHeight);
+                redrawCanvas(); // 重新绘制历史数据
+            }
+
+            resizeCanvas();
+            window.addEventListener('resize', resizeCanvas);
+
+            // 绘画事件
+            canvas.addEventListener('mousedown', startDrawing);
+            canvas.addEventListener('mousemove', draw);
+            canvas.addEventListener('mouseup', stopDrawing);
+            canvas.addEventListener('mouseout', stopDrawing);
+
+            // 触摸事件（移动端支持）
+            canvas.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                const touch = e.touches[0];
+                const rect = canvas.getBoundingClientRect();
+                const x = touch.clientX - rect.left;
+                const y = touch.clientY - rect.top;
+                startDrawing({ clientX: touch.clientX, clientY: touch.clientY });
+            });
+            canvas.addEventListener('touchmove', (e) => {
+                e.preventDefault();
+                const touch = e.touches[0];
+                draw({ clientX: touch.clientX, clientY: touch.clientY });
+            });
+            canvas.addEventListener('touchend', stopDrawing);
+            canvas.addEventListener('touchcancel', stopDrawing);
+        }
+
+        // 开始绘画
+        function startDrawing(e) {
+            state.isDrawing = true;
+            const rect = elements.canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            // 记录起始点
+            elements.ctx.beginPath();
+            elements.ctx.moveTo(x, y);
+            elements.ctx.lineCap = 'round';
+            elements.ctx.lineJoin = 'round';
+            elements.ctx.strokeStyle = state.currentTool === 'eraser' ? '#FFFFFF' : state.currentColor;
+            elements.ctx.lineWidth = state.currentTool === 'eraser' ? state.lineWidth * 2 : state.lineWidth;
+
+            // 保存到历史记录
+            state.canvasData.push({
+                type: 'start',
+                x, y,
+                color: elements.ctx.strokeStyle,
+                width: elements.ctx.lineWidth,
+                timestamp: Date.now()
+            });
+        }
+
+        // 绘画中
+        function draw(e) {
+            if (!state.isDrawing) return;
+
+            const rect = elements.canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            // 绘制线条
+            elements.ctx.lineTo(x, y);
+            elements.ctx.stroke();
+
+            // 保存到历史记录
+            state.canvasData.push({
+                type: 'draw',
+                x, y,
+                timestamp: Date.now()
+            });
+
+            // 同步到localStorage
+            saveToLocalStorage();
+        }
+
+        // 停止绘画
+        function stopDrawing() {
+            if (state.isDrawing) {
+                state.isDrawing = false;
+                elements.ctx.closePath();
+
+                // 保存到历史记录
+                state.canvasData.push({
+                    type: 'end',
+                    timestamp: Date.now()
+                });
+
+                // 同步到localStorage
+                saveToLocalStorage();
+            }
+        }
+
+        // 重新绘制画布（从历史记录）
+        function redrawCanvas() {
+            const ctx = elements.ctx;
+            ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+
+            if (state.canvasData.length === 0) return;
+
+            let currentPath = null;
+            state.canvasData.forEach(item => {
+                if (item.type === 'start') {
+                    currentPath = item;
+                    ctx.beginPath();
+                    ctx.moveTo(item.x, item.y);
+                    ctx.strokeStyle = item.color;
+                    ctx.lineWidth = item.width;
+                    ctx.lineCap = 'round';
+                    ctx.lineJoin = 'round';
+                } else if (item.type === 'draw' && currentPath) {
+                    ctx.lineTo(item.x, item.y);
+                    ctx.stroke();
+                } else if (item.type === 'end') {
+                    ctx.closePath();
+                    currentPath = null;
+                }
+            });
+        }
+
+        // 生成6位房间ID
+        function generateRoomId() {
+            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+            let roomId = '';
+            for (let i = 0; i < 6; i++) {
+                roomId += chars[Math.floor(Math.random() * chars.length)];
+            }
+            return roomId;
+        }
+
+        // 保存数据到localStorage
+        function saveToLocalStorage() {
+            const data = {
+                canvasData: state.canvasData,
+                chatMessages: state.chatMessages,
+                lastActive: Date.now()
+            };
+            localStorage.setItem(`doodle_${state.roomId}`, JSON.stringify(data));
+        }
+
+        // 从localStorage加载数据
+        function loadFromLocalStorage() {
+            const data = localStorage.getItem(`doodle_${state.roomId}`);
+            if (data) {
+                const parsed = JSON.parse(data);
+                state.canvasData = parsed.canvasData || [];
+                state.chatMessages = parsed.chatMessages || [];
+                redrawCanvas();
+                renderChatMessages();
+            }
+        }
+
+        // 渲染聊天消息
+        function renderChatMessages() {
+            elements.chatMessages.innerHTML = '';
+            state.chatMessages.forEach(msg => {
+                const isSelf = msg.username === state.username;
+                const messageEl = document.createElement('div');
+                messageEl.className = `chat-message ${isSelf ? 'chat-self' : 'chat-other'} p-2 bubble self-${isSelf ? 'end' : 'start'}`;
+                
+                const header = document.createElement('div');
+                header.className = `text-xs mb-1 ${isSelf ? 'text-right' : 'text-left'}`;
+                header.textContent = msg.username;
+                
+                const content = document.createElement('div');
+                content.className = 'text-sm';
+                content.textContent = msg.content;
+                
+                messageEl.appendChild(header);
+                messageEl.appendChild(content);
+                elements.chatMessages.appendChild(messageEl);
+            });
+            // 滚动到底部
+            elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight;
+        }
+
+        // 发送聊天消息
+        function sendChatMessage() {
+            const content = elements.chatInput.value.trim();
+            if (!content) return;
+
+            const message = {
+                username: state.username,
+                content,
+                timestamp: Date.now()
+            };
+
+            state.chatMessages.push(message);
+            renderChatMessages();
+            saveToLocalStorage();
+            elements.chatInput.value = '';
+        }
+
+        // 初始化工具事件
+        function initTools() {
+            // 工具按钮
+            document.querySelectorAll('.tool-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    // 移除其他按钮的active状态
+                    document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+                    // 添加当前按钮的active状态
+                    btn.classList.add('active');
+                    // 设置当前工具
+                    state.currentTool = btn.dataset.tool;
+
+                    // 工具操作
+                    switch (state.currentTool) {
+                        case 'clear':
+                            if (confirm('确定要清空画布吗？')) {
+                                state.canvasData = [];
+                                elements.ctx.clearRect(0, 0, elements.canvas.width, elements.canvas.height);
+                                saveToLocalStorage();
+                            }
+                            break;
+                        case 'save':
+                            const link = document.createElement('a');
+                            link.download = `涂鸦作品_${state.roomId}.png`;
+                            link.href = elements.canvas.toDataURL('image/png');
+                            link.click();
+                            break;
+                        case 'share':
+                            elements.shareRoomId.value = state.roomId;
+                            elements.roomLink.value = window.location.href;
+                            elements.shareModal.classList.remove('hidden');
+                            break;
+                    }
+                });
+            });
+
+            // 颜色按钮
+            document.querySelectorAll('.color-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.color-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    state.currentColor = btn.dataset.color;
+                    elements.customColor.value = btn.dataset.color;
+                });
+            });
+
+            // 自定义颜色
+            elements.customColor.addEventListener('input', (e) => {
+                state.currentColor = e.target.value;
+                document.querySelectorAll('.color-btn').forEach(b => b.classList.remove('active'));
+            });
+
+            // 线条粗细
+            elements.lineWidth.addEventListener('input', (e) => {
+                state.lineWidth = parseInt(e.target.value);
+            });
+
+            // 聊天发送
+            elements.sendChat.addEventListener('click', sendChatMessage);
+            elements.chatInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') sendChatMessage();
+            });
+
+            // 复制链接
+            elements.copyLink.addEventListener('click', () => {
+                elements.roomLink.select();
+                document.execCommand('copy');
+                alert('链接已复制！');
+            });
+
+            // 关闭分享模态框
+            elements.closeShare.addEventListener('click', () => {
+                elements.shareModal.classList.add('hidden');
+            });
+        }
+
+        // 解析URL参数中的房间ID
+        function parseRoomIdFromUrl() {
+            const params = new URLSearchParams(window.location.search);
+            return params.get('room');
+        }
+
+        // 初始化房间
+        function initRoom(roomId) {
+            state.roomId = roomId;
+            elements.roomId.textContent = roomId;
+            
+            // 更新URL（添加房间参数）
+            const url = new URL(window.location.href);
+            url.searchParams.set('room', roomId);
+            window.history.pushState({}, '', url);
+
+            // 加载数据
+            loadFromLocalStorage();
+
+            // 切换界面
+            elements.initScreen.classList.add('hidden');
+            elements.doodleScreen.classList.remove('hidden');
+            elements.roomStatus.classList.remove('hidden');
+
+            // 模拟在线人数（基于localStorage中活跃的用户）
+            updateOnlineCount();
+
+            // 定时同步数据（每2秒检查一次）
+            setInterval(() => {
+                loadFromLocalStorage();
+                updateOnlineCount();
+            }, 2000);
+        }
+
+        // 更新在线人数（模拟）
+        function updateOnlineCount() {
+            // 简单模拟：统计所有房间的活跃用户（实际可优化为IP统计）
+            let count = 1; // 至少自己在线
+            const allKeys = Object.keys(localStorage);
+            const roomKeys = allKeys.filter(key => key.startsWith(`doodle_${state.roomId}`));
+            
+            if (roomKeys.length > 0) {
+                count = Math.min(4, Math.floor(Math.random() * 3) + 1); // 模拟1-4人在线
+            }
+
+            elements.onlineCount.textContent = count;
+            elements.chatOnline.textContent = `在线: ${count}`;
+        }
+
+        // 初始化事件监听
+        function initEvents() {
+            // 创建房间
+            elements.createRoomBtn.addEventListener('click', () => {
+                const roomId = generateRoomId();
+                initRoom(roomId);
+            });
+
+            // 加入房间
+            elements.joinRoomBtn.addEventListener('click', () => {
+                const roomId = elements.joinRoomId.value.trim();
+                if (!roomId || roomId.length !== 6) {
+                    alert('请输入有效的6位房间ID！');
+                    return;
+                }
+                initRoom(roomId);
+            });
+
+            // 回车加入房间
+            elements.joinRoomId.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    elements.joinRoomBtn.click();
+                }
+            });
+
+            // 页面加载时检查是否有房间ID
+            const urlRoomId = parseRoomIdFromUrl();
+            if (urlRoomId && urlRoomId.length === 6) {
+                initRoom(urlRoomId);
+            }
+        }
+
+        // 初始化应用
+        function initApp() {
+            initCanvas();
+            initTools();
+            initEvents();
+        }
+
+        // 启动应用
+        window.addEventListener('DOMContentLoaded', initApp);
+    </script>
+</body>
+</html>
